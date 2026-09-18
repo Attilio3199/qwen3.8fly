@@ -1231,16 +1231,19 @@ function stepLocal(dt) {
   _fwd.set(0, 0, -1).applyQuaternion(local.q);
   let airspeed = local.v.dot(_fwd);
   if (airspeed < -8) airspeed = -8;
-  const eff = clamp(airspeed / 90, 0.12, 1.35);
+  // Arcade controls need authority even just after respawn. The old formula
+  // started at 12% effectiveness, so yaw and pitch looked almost frozen until
+  // the aircraft had already built up a lot of speed.
+  const eff = clamp(0.48 + airspeed / 125, 0.48, 1.35);
 
   const pitchIn = clamp(Input.axis('pitch'), -1, 1);
   const yawIn = clamp(Input.axis('yaw'), -1, 1);
   const rollIn = clamp(Input.axis('roll'), -1, 1);
 
   // local-axis rotations (applied in yaw/pitch/roll order for intuitive feel)
-  const pr = pitchIn * 1.7 * eff * dt;
-  const yr = yawIn * 1.15 * eff * dt;
-  const rr = rollIn * 2.7 * eff * dt;
+  const pr = pitchIn * 2.25 * eff * dt;
+  const yr = yawIn * 1.85 * eff * dt;
+  const rr = rollIn * 3.45 * eff * dt;
   _qP.setFromAxisAngle(_xAxis, -pr);
   _qY.setFromAxisAngle(_yAxis, -yr);
   _qR.setFromAxisAngle(_zAxis, rr);
@@ -2247,6 +2250,13 @@ function enterCombat() {
   $('mini-wrap').style.display = 'flex';
   $('end-screen').classList.remove('on');
   Game.selectedSlot = 0;
+  // A match must always start in a controllable flight camera. Orbit mode uses
+  // the arrow keys for the camera and would otherwise make steering appear
+  // broken when starting another match.
+  Game.camMode = 'chase';
+  Game.camYaw = 0;
+  Game.camPitch = 0.3;
+  Game.camDist = 26;
   Game._myScore = (Game.score.p1 + Game.score.p2 === 0) ? 0 : (Game._myScore || 0);
   local.team = local.team || 1;
   Game.ammo = Game.loadout.map((w) => WPN[w].mag);
@@ -2312,16 +2322,6 @@ Game.onKey = (code) => {
     case 'Digit1': Game.selectedSlot = 0; buildWeaponHUD(); break;
     case 'Digit2': Game.selectedSlot = 1; buildWeaponHUD(); break;
     case 'Digit3': Game.selectedSlot = 2; buildWeaponHUD(); break;
-    case 'KeyV': {
-      if (!Game._lastV || performance.now() - Game._lastV > 250) {
-        Game.camMode = Game.camMode === 'chase' ? 'cockpit' : Game.camMode === 'cockpit' ? 'orbit' : 'chase';
-        Game.camYaw = 0; Game.camPitch = 0.3; Game.camDist = 26;
-        toast('Camera: ' + Game.camMode.toUpperCase());
-        Game._lastV = performance.now();
-      }
-      break;
-    }
-    case 'KeyR': tryAbility(); break;
     case 'Tab': showScoreboard(!$('scoreboard').classList.contains('on')); break;
     case 'KeyN': AudioSys.setMuted(!AudioSys.muted); $('mute-btn').textContent = AudioSys.muted ? '🔇' : '🔊'; break;
     case 'Escape': showScoreboard(false); break;

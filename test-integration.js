@@ -1,6 +1,6 @@
 // End-to-end protocol test: full combat flow, team mode, late join.
 // Usage: node test-integration.js
-const URL = 'ws://localhost:3001';
+const URL = process.env.TEST_URL || 'ws://localhost:3000';
 let pass = 0, fail = 0;
 const ok = (c, msg) => { if (c) { pass++; console.log('  PASS', msg); } else { fail++; console.log('  FAIL', msg); } };
 

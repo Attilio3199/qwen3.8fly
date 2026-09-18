@@ -312,7 +312,7 @@ function serverTick() {
   const dt = (now - lastTick) / 1000;
   lastTick = now;
 
-  if (S.phase !== 'lobby') {
+  if (S.phase === 'combat') {
     S.timeLeft -= dt;
     if (S.timeLeft <= 0) {
       if (S.match === 'team' && S.score.p1 < TEAM_GOAL && S.score.p2 < TEAM_GOAL) {
