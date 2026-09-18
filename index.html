@@ -257,7 +257,7 @@
 </style>
 </head>
 <body>
-<canvas id="game-canvas"></canvas>
+<canvas id="game-canvas" tabindex="0" aria-label="Air Combat game"></canvas>
 
 <!-- ================= HUD ================= -->
 <div id="hud">
@@ -553,7 +553,7 @@ const Input = {
     addEventListener('keydown', (e) => {
       if (e.repeat) return;
       this.keys[e.code] = true;
-      if (['Tab', 'Space'].includes(e.code)) e.preventDefault();
+      if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
       Game.onKey(e.code);
     });
     addEventListener('keyup', (e) => { this.keys[e.code] = false; });
@@ -1341,6 +1341,7 @@ function respawnAt(p) {
   local.alive = true;
   Game.ammo = Game.loadout.map((w) => WPN[w].mag);
   Game.reloadT = [0, 0, 0];
+  canvas.focus({ preventScroll: true });
   document.getElementById('respawn-overlay').classList.remove('on');
   AudioSys.respawn();
   updatePlaneMesh();
@@ -2383,6 +2384,7 @@ function loop(now) {
   if (Game.state === 'combat') {
     // local simulation (client prediction)
     stepLocal(dt);
+    updatePlaneMesh();
     AudioSys.engine(local.throttle, local.v.length(), local.boostT);
     // weapons
     tryFire(dt);
