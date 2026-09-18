@@ -1,0 +1,37 @@
+✈  Air Combat server listening on ws://localhost:3001
+   health: http://localhost:3001/health
+[msg] t=join player=none
+[join] Alpha (plane=fighter) — 1 online
+[msg] t=join player=none
+[join] Bravo (plane=interceptor) — 2 online
+[msg] t=input player=Alpha
+[msg] t=input player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=fire player=Alpha
+[msg] t=join player=none
+[join] Charlie (plane=bomber) — 3 online
+[msg] t=input player=Charlie
+[msg] t=join player=none
+[join] Pilot-511 (plane=fighter) — 1 online
+[msg] t=join player=none
+[join] Pilot-511 (plane=fighter) — 1 online
+[msg] t=join player=none
+[join] Pilot-511 (plane=fighter) — 1 online
+[msg] t=join player=none
+[join] Pilot-511 (plane=fighter) — 1 online
+[msg] t=join player=none
+[join] Pilot-511 (plane=fighter) — 1 online
+[msg] t=join player=none
+[join] Pilot-511 (plane=fighter) — 1 online
+[msg] t=join player=none
+[join] Pilot-511 (plane=fighter) — 1 online
+[msg] t=join player=none
+[join] Pilot-511 (plane=fighter) — 1 online
