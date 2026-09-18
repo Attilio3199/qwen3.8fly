@@ -322,7 +322,7 @@
   <div class="lobby-inner">
     <div class="logo">
       <h1>SKYFALL</h1>
-      <p>Multiplayer Air Combat</p>
+      <p>Air Combat</p>
     </div>
     <div class="lobby-grid">
       <div class="panel">
@@ -338,6 +338,7 @@
         <div class="match-opt" id="match-opt">
           <label data-mode="deathmatch" class="sel">Free-For-All<small>Deathmatch — highest score wins</small></label>
           <label data-mode="team">Team Battle<small>2 teams — first to 500 pts</small></label>
+          <label data-mode="single">Single Player<small>Fight against Raven AI</small></label>
         </div>
         <h2>Online</h2>
         <div class="online-row" id="online-row"><span class="online-chip">Connecting…</span></div>
@@ -391,7 +392,7 @@ import * as THREE from 'three';
    CONSTANTS & PLANE SPECS (client mirror of server)
 ================================================================ */
 const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') +
-  (new URLSearchParams(location.search).get('ws') || 'localhost:3001');
+  (new URLSearchParams(location.search).get('ws') || location.host);
 const WORLD_R = 4200, MAX_H = 5200;
 const TAU = Math.PI * 2;
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
@@ -1722,8 +1723,14 @@ const Net = {
           for (const p of m.players) {
             if (p.id === Game.me) { local.team = p.team || 1; Game._myScore = p.score || 0; }
             else {
-              const r = Game.players.get(p.id);
-              if (r) { r.name = p.name; r.team = p.team; r._nameDrawn = r.name; }
+              const r = getRemote(p.id);
+              r.name = p.name; r.team = p.team; r.plane = p.plane || r.plane; r.hp = p.h ?? r.hp;
+              r._nameDrawn = r.name; r.mesh.visible = true;
+              if (p.p && p.q) {
+                r.snap = { ts: Date.now(), p: new THREE.Vector3().fromArray(p.p), q: new THREE.Quaternion().set(...p.q) };
+                r.interpTo = { ts: r.snap.ts, p: r.snap.p.clone(), q: r.snap.q.clone() };
+                r.mesh.position.copy(r.snap.p); r.mesh.quaternion.copy(r.snap.q);
+              }
             }
           }
         }

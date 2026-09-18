@@ -23,9 +23,12 @@
 'use strict';
 
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 
-const PORT = process.env.PORT ? Number(process.env.PORT) : 3001;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+const ROOT = path.resolve(__dirname, '..');
 const WORLD_R = 4200;          // world radius (soft boundary)
 const MAX_H = 5200;            // max altitude
 const TAU = Math.PI * 2;
@@ -102,11 +105,11 @@ function makeSpawn(team) {
   };
 }
 
-function newPlayer(ws, id, name, plane, weapons, ability) {
+function newPlayer(ws, id, name, plane, weapons, ability, isBot = false) {
   const spec = PLANE_SPECS[plane] || PLANE_SPECS.fighter;
   const spawn = makeSpawn(1);
   return {
-    id, ws,
+    id, ws, isBot,
     name: String(name || 'Pilot').slice(0, 16),
     plane, spec,
     weapons: Array.isArray(weapons) && weapons.length === 3 ? weapons : [...spec.weapons],
@@ -127,31 +130,42 @@ function newPlayer(ws, id, name, plane, weapons, ability) {
 function broadcast(obj, exceptId) {
   const data = JSON.stringify(obj);
   for (const pl of S.players.values()) {
-    if (pl.id === exceptId || pl.ws.readyState !== 1) continue;
+    if (pl.id === exceptId || !pl.ws || pl.ws.readyState !== 1) continue;
     try { pl.ws.send(data); } catch (_) { /* drop */ }
   }
 }
 
 function sendTo(pl, obj) {
-  if (pl.ws.readyState === 1) { try { pl.ws.send(JSON.stringify(obj)); } catch (_) {} }
+  if (pl.ws && pl.ws.readyState === 1) { try { pl.ws.send(JSON.stringify(obj)); } catch (_) {} }
 }
 
 // ---------------------------------------------------------------- match flow
 function playersSummary() {
-  return [...S.players.values()].map((o) => ({ id: o.id, name: o.name, team: o.team, score: o.score }));
+  return [...S.players.values()].map((o) => ({
+    id: o.id, name: o.name, plane: o.plane, team: o.team, score: o.score,
+    kills: o.kills, deaths: o.deaths, p: o.p, q: o.q, h: o.hp, bot: o.isBot,
+  }));
+}
+
+function addSinglePlayerBot() {
+  if ([...S.players.values()].some((pl) => pl.isBot)) return;
+  const bot = newPlayer(null, S.nextId++, 'Raven AI', 'interceptor', null, null, true);
+  bot.team = 2;
+  S.players.set(bot.id, bot);
 }
 
 function startMatch(mode) {
+  if (mode === 'single') addSinglePlayerBot();
   const players = [...S.players.values()];
   if (players.length === 0) return;
 
-  S.match = (mode === 'team' || mode === 'deathmatch')
+  S.match = (mode === 'team' || mode === 'deathmatch' || mode === 'single')
     ? mode
     : (players.length >= 2 && Math.random() < 0.5 ? 'team' : 'deathmatch');
   // team assignment: alternate
   let t = 1;
   for (const pl of players) {
-    pl.team = S.match === 'team' ? t++ : 1;
+    pl.team = S.match === 'team' ? t++ : (pl.isBot ? 2 : 1);
     if (t > 2) t = 1;
   }
   for (const pl of players) {
@@ -189,7 +203,6 @@ function fireWeapon(pl, slot, target, normDir, startP) {
   pl.lastFire = now + spec.reload * 1000;
 
   const dir = normDir.slice();
-  const [dx, dy, dz] = dir;
   dir[0] += rnd(-1, 1) * spec.spread;
   dir[1] += rnd(-1, 1) * spec.spread;
   dir[2] += rnd(-1, 1) * spec.spread;
@@ -198,14 +211,22 @@ function fireWeapon(pl, slot, target, normDir, startP) {
   broadcast({ t: 'fire', id: pl.id, slot, w, tgt: target, n: d, s: startP }, null);
   // (fire is visible to everyone incl. shooter; shooter also plays local fx)
 
-  // Immediate hit check at spawn (point-blank)
+  // Lightweight server-side ray hit check. The former point-blank-only check
+  // made it effectively impossible to damage a moving opponent from the air.
+  const origin = Array.isArray(startP) && startP.length === 3 ? startP.map(Number) : pl.p;
+  const range = w === 'cannon' ? 700 : w === 'rocket' ? 1200 : 900;
+  const hitRadius = w === 'cannon' ? 28 : 52;
+  let hit = null;
+  let nearest = Infinity;
   for (const other of S.players.values()) {
     if (other === pl || !other.alive) continue;
-    const rr = 6.5;
-    if (dist2(pl.p[0], pl.p[1], pl.p[2], other.p[0], other.p[1], other.p[2]) < rr * rr) {
-      damage(other, spec.dmg, pl, w);
-    }
+    const to = [other.p[0] - origin[0], other.p[1] - origin[1], other.p[2] - origin[2]];
+    const forward = to[0] * d[0] + to[1] * d[1] + to[2] * d[2];
+    if (forward < 0 || forward > range || forward >= nearest) continue;
+    const perpendicular2 = (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]) - forward * forward;
+    if (perpendicular2 <= hitRadius * hitRadius) { hit = other; nearest = forward; }
   }
+  if (hit) damage(hit, spec.dmg, pl, w);
 }
 
 function damage(victim, dmg, by, weapon) {
@@ -254,6 +275,38 @@ function kill(victim, by, weapon) {
 const TICK = 50; // ms
 let lastTick = Date.now();
 
+function tickBots(now, dt) {
+  for (const bot of S.players.values()) {
+    if (!bot.isBot || !bot.alive || S.phase !== 'combat') continue;
+    const target = [...S.players.values()].find((pl) => !pl.isBot && pl.alive);
+    if (!target) continue;
+
+    // Circle the player at combat range. This is intentionally predictable enough
+    // for a first single-player opponent, while still giving a moving target.
+    const angle = now / 1300 + bot.id;
+    const radius = 420;
+    const desired = [
+      target.p[0] + Math.cos(angle) * radius,
+      clamp(target.p[1] + 70 + Math.sin(angle * 0.7) * 110, 180, MAX_H - 180),
+      target.p[2] + Math.sin(angle) * radius,
+    ];
+    const k = Math.min(1, dt * 0.7);
+    bot.v = desired.map((v, i) => (v - bot.p[i]) / Math.max(dt, 0.01));
+    bot.p = bot.p.map((v, i) => v + (desired[i] - v) * k);
+    const yaw = Math.atan2(target.p[0] - bot.p[0], target.p[2] - bot.p[2]);
+    bot.q = [0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2)];
+    bot.lastSeen = now;
+
+    const d2 = dist2(bot.p[0], bot.p[1], bot.p[2], target.p[0], target.p[1], target.p[2]);
+    if (d2 < 850 * 850 && (!bot.lastFire || now >= bot.lastFire)) {
+      bot.lastFire = now + 900;
+      const dir = norm3([target.p[0] - bot.p[0], target.p[1] - bot.p[1], target.p[2] - bot.p[2]]);
+      broadcast({ t: 'fire', id: bot.id, slot: 0, w: 'cannon', n: dir, s: bot.p });
+      if (Math.random() < 0.42) damage(target, 7, bot, 'cannon');
+    }
+  }
+}
+
 function serverTick() {
   const now = Date.now();
   const dt = (now - lastTick) / 1000;
@@ -273,6 +326,7 @@ function serverTick() {
 
   // time of day drift: full cycle ~ 8 min
   S.tod = (S.tod + dt / (8 * 60)) % 1;
+  tickBots(now, dt);
 
   // lag compensation: last known input, re-broadcast to others
   for (const pl of S.players.values()) {
@@ -289,7 +343,7 @@ function serverTick() {
       broadcast({ t: 'join', id: pl.id }, pl.id);
     }
     // idle reaper
-    if (now - pl.lastSeen > 15000) removePlayer(pl, true);
+    if (!pl.isBot && now - pl.lastSeen > 15000) removePlayer(pl, true);
   }
 
   // periodic time broadcast (cheap: 1/sec)
@@ -300,9 +354,11 @@ function serverTick() {
 
 function removePlayer(pl, silent) {
   S.players.delete(pl.id);
-  try { pl.ws.close(); } catch (_) {}
+  try { if (pl.ws) pl.ws.close(); } catch (_) {}
   if (!silent) broadcast({ t: 'leave', id: pl.id });
-  if (S.phase !== 'lobby' && S.players.size === 0) {
+  const humansLeft = [...S.players.values()].some((p) => !p.isBot);
+  if (!humansLeft) {
+    for (const p of [...S.players.values()]) if (p.isBot) S.players.delete(p.id);
     S.phase = 'lobby';
     S.started = false;
     broadcast({ t: 'state', phase: 'lobby', match: S.match, score: S.score, timeLeft: 0, players: [] });
@@ -316,7 +372,16 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ ok: true, phase: S.phase, players: S.players.size }));
     return;
   }
-  res.writeHead(404); res.end('air-combat server');
+  const requestPath = decodeURIComponent(req.url.split('?')[0]);
+  const relativePath = requestPath === '/' ? 'index.html' : requestPath.replace(/^[/\\]+/, '');
+  const filePath = path.resolve(ROOT, relativePath);
+  if (!filePath.startsWith(ROOT + path.sep)) { res.writeHead(403); res.end('Forbidden'); return; }
+  const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+  fs.readFile(filePath, (err, data) => {
+    if (err) { res.writeHead(404); res.end('Not found'); return; }
+    res.writeHead(200, { 'Content-Type': mime[path.extname(filePath)] || 'application/octet-stream' });
+    res.end(data);
+  });
 });
 
 const wss = new WebSocketServer({ server });
@@ -433,6 +498,6 @@ setInterval(() => {
 }, 20000);
 
 server.listen(PORT, () => {
-  console.log(`✈  Air Combat server listening on ws://localhost:${PORT}`);
+  console.log(`✈  Air Combat ready at http://localhost:${PORT}`);
   console.log(`   health: http://localhost:${PORT}/health`);
 });
