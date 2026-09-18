@@ -406,7 +406,13 @@ function handleMsg(ws, m) {
 
   switch (m.t) {
     case 'join': {
-      if (pl) { updateProfile(pl, m); break; }
+      if (pl) {
+        updateProfile(pl, m);
+        // The browser joins as soon as its socket opens, then sends a second
+        // join message with `start` when the Deploy button is clicked.
+        if (m.start && S.phase === 'lobby') startMatch(m.mode);
+        break;
+      }
       const id = S.nextId++;
       pl = newPlayer(ws, id, m.name, m.plane, m.weapons, m.ability);
       S.players.set(id, pl);
